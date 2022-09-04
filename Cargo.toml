@@ -1,0 +1,11 @@
+[package]
+name = "libcosiauthd"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nss_example"
+crate-type = [ "cdylib" ]
+
+[dependencies]
+libnss = "0.4.0"
