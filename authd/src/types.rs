@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-pub trait ToNSS<T> {
-    fn to_nss(&self) -> T;
+pub trait ToNSS {
+    type Target;
+    fn to_nss(&self) -> Self::Target;
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -11,7 +12,8 @@ pub struct Group {
     members: Vec<String>,
 }
 
-impl ToNSS<libnss::group::Group> for Group {
+impl ToNSS for Group {
+    type Target = libnss::group::Group;
     fn to_nss(&self) -> libnss::group::Group {
         libnss::group::Group {
             name: self.name.clone(),
@@ -46,7 +48,8 @@ pub struct Passwd {
     shell: String,
 }
 
-impl ToNSS<libnss::passwd::Passwd> for Passwd {
+impl ToNSS for Passwd {
+    type Target = libnss::passwd::Passwd;
     fn to_nss(&self) -> libnss::passwd::Passwd {
         libnss::passwd::Passwd {
             name: self.name.clone(),
@@ -87,7 +90,8 @@ pub struct Shadow {
     expire_date: i64,
 }
 
-impl ToNSS<libnss::shadow::Shadow> for Shadow {
+impl ToNSS for Shadow {
+    type Target = libnss::shadow::Shadow;
     fn to_nss(&self) -> libnss::shadow::Shadow {
         libnss::shadow::Shadow {
             name: self.name.clone(),
