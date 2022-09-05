@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
-use futures_util::{future, StreamExt};
-
 use authd::{
     rpc::Authd,
     types::{Group, Passwd, Shadow},
 };
+use futures_util::{future, StreamExt};
 use tarpc::{
     server::{incoming::Incoming, Channel},
     tokio_serde::formats::Json,
@@ -63,14 +60,14 @@ async fn main() -> anyhow::Result<()> {
         // Ignore accept errors.
         .filter_map(|r| future::ready(r.ok()))
         .map(tarpc::server::BaseChannel::with_defaults)
-        // Limit channels to 20 per IP (VM hosts contain many endpoints).
-        .max_channels_per_key(20, |t| t.transport().peer_addr().unwrap().ip())
+        // Limit channels to 10 per IP (VM hosts contain many endpoints, maybe they all log in at the same time).
+        .max_channels_per_key(10, |t| t.transport().peer_addr().unwrap().ip())
         .map(|channel| {
             let server = FauxDb(channel.transport().peer_addr().unwrap());
             channel.execute(server.serve())
         })
-        // Max 1000 channels (ITL + COSI + Servers + VMs should be fine forever? 1k connection table is not that big. )
-        .buffer_unordered(1000)
+        // Max 100 channels (ITL + COSI + Servers + VMs should be fine? )
+        .buffer_unordered(100)
         .for_each(|_| async {})
         .await;
 

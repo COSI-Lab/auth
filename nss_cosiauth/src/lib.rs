@@ -1,90 +1,154 @@
+use authd::rpc::AuthdClient;
 use authd::types::ToNSS;
 use futures::executor::block_on;
 use libc::c_int;
 use libnss::group::{CGroup, Group, GroupHooks};
-use libnss::interop::{CBuffer, Iterator, Response};
+use libnss::interop::{Iterator, Response};
 use libnss::passwd::{CPasswd, Passwd};
 use std::ffi::CStr;
 use std::str;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use tarpc::context;
+use tokio::time::sleep_until;
+
+#[derive(Default)]
+struct ClientAccessControl {
+    client: Arc<Mutex<Option<authd::rpc::AuthdClient>>>,
+    latest_ts: Arc<Mutex<Option<Instant>>>,
+}
+
+use stubborn_io::{ReconnectOptions, StubbornTcpStream};
+use tarpc::{client::Config, serde_transport::Transport};
+use tokio::net::ToSocketAddrs;
+
+pub async fn client_connect<A: ToSocketAddrs + Unpin + Clone + Send + Sync + 'static>(
+    addr: A,
+) -> std::io::Result<AuthdClient> {
+    let reconnect_opts = ReconnectOptions::new()
+        .with_exit_if_first_connect_fails(false)
+        .with_retries_generator(|| std::iter::repeat(Duration::from_secs(1)));
+    let tcp_stream = StubbornTcpStream::connect_with_options(addr, reconnect_opts).await?;
+    let transport = Transport::from((tcp_stream, tarpc::tokio_serde::formats::Json::default()));
+    Ok(AuthdClient::new(Config::default(), transport).spawn())
+}
+
+impl ClientAccessControl {
+    fn with_client<O>(&mut self, f: impl FnOnce(&mut authd::rpc::AuthdClient) -> O) -> O {
+        let mut lts = self.latest_ts.lock().unwrap();
+
+        if let Some(slp) = lts.as_mut() {
+            *slp = std::time::Instant::now() + Duration::from_secs(30);
+        } else {
+            *lts = Some(std::time::Instant::now() + Duration::from_secs(30));
+        }
+        let cl = self.client.clone();
+        let latest_ts = self.latest_ts.clone();
+        tokio::spawn(async move {
+            loop {
+                let dur = latest_ts.lock().unwrap().unwrap_or(Instant::now()).into();
+                sleep_until(dur).await;
+                // check if it got moved forward while we were sleeping
+                if latest_ts.lock().unwrap().unwrap_or(Instant::now()) < Instant::now() {
+                    *cl.lock().unwrap() = None;
+                    #[cfg(debug_assertions)]
+                    eprintln!("ClientAccessControl: client timed out, closing connection.");
+                    break;
+                }
+            }
+        });
+
+        let mut client = self.client.lock().unwrap();
+        if client.is_none() {
+            *client = Some(block_on(client_connect(("127.0.0.1", 8080))).unwrap());
+        }
+        f(client.as_mut().unwrap())
+    }
+}
 
 lazy_static::lazy_static! {
     static ref PASSWD_ITERATOR: Mutex<Iterator<Passwd>> = Mutex::new(Iterator::<Passwd>::new());
     static ref GROUP_ITERATOR: Mutex<Iterator<Group>> = Mutex::new(Iterator::<Group>::new());
 
-    static ref RPC: Mutex<authd::rpc::AuthdClient> = {
+    static ref RPC: Mutex<ClientAccessControl> = Mutex::new(ClientAccessControl::default());
 
-    let transport = tarpc::serde_transport::tcp::connect(("127.0.0.1", 8080), tarpc::tokio_serde::formats::Json::default);
-
-    let client = authd::rpc::AuthdClient::new(tarpc::client::Config::default(), futures::executor::block_on(transport).unwrap()).spawn();
-        Mutex::new(client)
-    };
 }
 
 struct CauthdPasswd;
 impl libnss::passwd::PasswdHooks for CauthdPasswd {
     fn get_all_entries() -> libnss::interop::Response<Vec<libnss::passwd::Passwd>> {
-        let client = RPC.lock().unwrap();
-        match block_on(client.get_all_passwd(context::current())) {
-            Ok(passwds) => Response::Success(passwds.into_iter().map(|x| x.to_nss()).collect()),
-            Err(_e) => Response::Unavail,
-        }
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(
+            |client| match block_on(client.get_all_passwd(context::current())) {
+                Ok(passwds) => Response::Success(passwds.into_iter().map(|x| x.to_nss()).collect()),
+                Err(_e) => Response::Unavail,
+            },
+        )
     }
 
     fn get_entry_by_uid(uid: libc::uid_t) -> libnss::interop::Response<libnss::passwd::Passwd> {
-        let client = RPC.lock().unwrap();
-        match block_on(client.get_passwd_by_uid(context::current(), uid)) {
-            Ok(passwd) => match passwd {
-                Some(p) => Response::Success(p.to_nss()),
-                None => Response::NotFound,
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(
+            |client| match block_on(client.get_passwd_by_uid(context::current(), uid)) {
+                Ok(passwd) => match passwd {
+                    Some(p) => Response::Success(p.to_nss()),
+                    None => Response::NotFound,
+                },
+                Err(_e) => Response::Unavail,
             },
-            Err(_e) => Response::Unavail,
-        }
+        )
     }
 
     fn get_entry_by_name(name: String) -> libnss::interop::Response<libnss::passwd::Passwd> {
-        let client = RPC.lock().unwrap();
-        match block_on(client.get_passwd_by_name(context::current(), name)) {
-            Ok(passwd) => match passwd {
-                Some(p) => Response::Success(p.to_nss()),
-                None => Response::NotFound,
-            },
-            Err(_e) => Response::Unavail,
-        }
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(|client| {
+            match block_on(client.get_passwd_by_name(context::current(), name)) {
+                Ok(passwd) => match passwd {
+                    Some(p) => Response::Success(p.to_nss()),
+                    None => Response::NotFound,
+                },
+                Err(_e) => Response::Unavail,
+            }
+        })
     }
 }
 
 struct CauthdGroup;
 impl libnss::group::GroupHooks for CauthdGroup {
     fn get_all_entries() -> libnss::interop::Response<Vec<libnss::group::Group>> {
-        let client = RPC.lock().unwrap();
-        match block_on(client.get_all_groups(context::current())) {
-            Ok(passwds) => Response::Success(passwds.into_iter().map(|x| x.to_nss()).collect()),
-            Err(_e) => Response::Unavail,
-        }
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(
+            |client| match block_on(client.get_all_groups(context::current())) {
+                Ok(passwds) => Response::Success(passwds.into_iter().map(|x| x.to_nss()).collect()),
+                Err(_e) => Response::Unavail,
+            },
+        )
     }
 
     fn get_entry_by_gid(gid: libc::gid_t) -> libnss::interop::Response<libnss::group::Group> {
-        let client = RPC.lock().unwrap();
-        match block_on(client.get_group_by_gid(context::current(), gid)) {
-            Ok(passwd) => match passwd {
-                Some(p) => Response::Success(p.to_nss()),
-                None => Response::NotFound,
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(
+            |client| match block_on(client.get_group_by_gid(context::current(), gid)) {
+                Ok(passwd) => match passwd {
+                    Some(p) => Response::Success(p.to_nss()),
+                    None => Response::NotFound,
+                },
+                Err(_e) => Response::Unavail,
             },
-            Err(_e) => Response::Unavail,
-        }
+        )
     }
 
     fn get_entry_by_name(name: String) -> libnss::interop::Response<libnss::group::Group> {
-        let client = RPC.lock().unwrap();
-        match block_on(client.get_group_by_name(context::current(), name)) {
-            Ok(passwd) => match passwd {
-                Some(p) => Response::Success(p.to_nss()),
-                None => Response::NotFound,
-            },
-            Err(_e) => Response::Unavail,
-        }
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(|client| {
+            match block_on(client.get_group_by_name(context::current(), name)) {
+                Ok(passwd) => match passwd {
+                    Some(p) => Response::Success(p.to_nss()),
+                    None => Response::NotFound,
+                },
+                Err(_e) => Response::Unavail,
+            }
+        })
     }
 }
 
@@ -93,7 +157,7 @@ use libnss::passwd::PasswdHooks;
 extern "C" fn _nss_cosiauthd_setpwent() -> c_int {
     let mut iter: MutexGuard<Iterator<Passwd>> = PASSWD_ITERATOR.lock().unwrap();
 
-    let status = match (CauthdPasswd::get_all_entries()) {
+    let status = match CauthdPasswd::get_all_entries() {
         Response::Success(entries) => iter.open(entries),
         response => response.to_status(),
     };
@@ -150,7 +214,7 @@ unsafe extern "C" fn nss_cosiauthd_getpwnam_r(
 extern "C" fn _nss_cosiauthd_setgrent() -> c_int {
     let mut iter: MutexGuard<Iterator<Group>> = GROUP_ITERATOR.lock().unwrap();
 
-    let status = match (CauthdGroup::get_all_entries()) {
+    let status = match CauthdGroup::get_all_entries() {
         Response::Success(entries) => iter.open(entries),
         response => response.to_status(),
     };
