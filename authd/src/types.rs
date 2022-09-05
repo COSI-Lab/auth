@@ -7,9 +7,9 @@ pub trait ToNSS {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Group {
-    name: String,
-    gid: u32,
-    members: Vec<String>,
+    pub name: String,
+    pub gid: u32,
+    pub members: Vec<String>,
 }
 
 impl ToNSS for Group {
@@ -37,15 +37,15 @@ impl From<Group> for libnss::group::Group {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Passwd {
-    name: String,
+    pub name: String,
     // forcing the uid to match the gid because we're pissed
-    id: u32,
-    gecos: String,
+    pub id: u32,
+    pub gecos: String,
     // TODO: clients should be able to choose the front path of the home dir based on where NFS is
     // mounted.
-    dir: String,
+    pub dir: String,
     // TODO: we could send shells as enums and allow clients to configure the binary locations
-    shell: String,
+    pub shell: String,
 }
 
 impl ToNSS for Passwd {
@@ -79,15 +79,15 @@ impl From<Passwd> for libnss::passwd::Passwd {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Shadow {
-    name: String,
-    passwd: String,
+    pub name: String,
+    pub passwd: String,
     /// days since Jan 1st 1970
-    last_change: i64,
-    change_min_days: i64,
-    change_max_days: i64,
-    change_warn_days: i64,
-    change_inactive_days: i64,
-    expire_date: i64,
+    pub last_change: i64,
+    pub change_min_days: i64,
+    pub change_max_days: i64,
+    pub change_warn_days: i64,
+    pub change_inactive_days: i64,
+    pub expire_date: i64,
 }
 
 impl ToNSS for Shadow {
