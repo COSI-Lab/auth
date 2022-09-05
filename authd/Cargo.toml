@@ -9,4 +9,9 @@ edition = "2021"
 actix-web = "4"
 serde = { version = "1", features = ["derive"] }
 libnss = "0.4"
-essrpc = "*"
+reqwest = "*"
+serde_cbor = "*"
+tarpc = { version = "0.30", features = [ "full" ] }
+tokio = "*"
+anyhow = "*"
+futures-util = "*"
