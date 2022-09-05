@@ -10,6 +10,7 @@ use std::str;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tarpc::context;
+use tokio::runtime::Runtime;
 use tokio::time::sleep_until;
 
 #[derive(Default)]
@@ -35,6 +36,7 @@ pub async fn client_connect<A: ToSocketAddrs + Unpin + Clone + Send + Sync + 'st
 
 impl ClientAccessControl {
     fn with_client<O>(&mut self, f: impl FnOnce(&mut authd::rpc::AuthdClient) -> O) -> O {
+        let _guard = RT.enter();
         let mut lts = self.latest_ts.lock().unwrap();
 
         if let Some(slp) = lts.as_mut() {
@@ -69,9 +71,10 @@ impl ClientAccessControl {
 lazy_static::lazy_static! {
     static ref PASSWD_ITERATOR: Mutex<Iterator<Passwd>> = Mutex::new(Iterator::<Passwd>::new());
     static ref GROUP_ITERATOR: Mutex<Iterator<Group>> = Mutex::new(Iterator::<Group>::new());
+    static ref SHADOW_ITERATOR: Mutex<Iterator<Shadow>> = Mutex::new(Iterator::<Shadow>::new());
 
     static ref RPC: Mutex<ClientAccessControl> = Mutex::new(ClientAccessControl::default());
-
+    static ref RT: Runtime = Runtime::new().expect("could not initialize tokio runtime");
 }
 
 struct CauthdPasswd;
@@ -103,6 +106,31 @@ impl libnss::passwd::PasswdHooks for CauthdPasswd {
         let mut cl = RPC.lock().unwrap();
         cl.with_client(|client| {
             match block_on(client.get_passwd_by_name(context::current(), name)) {
+                Ok(passwd) => match passwd {
+                    Some(p) => Response::Success(p.to_nss()),
+                    None => Response::NotFound,
+                },
+                Err(_e) => Response::Unavail,
+            }
+        })
+    }
+}
+struct CauthdShadow;
+impl libnss::shadow::ShadowHooks for CauthdShadow {
+    fn get_all_entries() -> libnss::interop::Response<Vec<libnss::shadow::Shadow>> {
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(
+            |client| match block_on(client.get_all_shadow(context::current())) {
+                Ok(passwds) => Response::Success(passwds.into_iter().map(|x| x.to_nss()).collect()),
+                Err(_e) => Response::Unavail,
+            },
+        )
+    }
+
+    fn get_entry_by_name(name: String) -> libnss::interop::Response<libnss::shadow::Shadow> {
+        let mut cl = RPC.lock().unwrap();
+        cl.with_client(|client| {
+            match block_on(client.get_shadow_by_name(context::current(), name)) {
                 Ok(passwd) => match passwd {
                     Some(p) => Response::Success(p.to_nss()),
                     None => Response::NotFound,
@@ -262,6 +290,55 @@ unsafe extern "C" fn nss_cosiauthd_getgrnam_r(
 
     let response = match str::from_utf8(cstr.to_bytes()) {
         Ok(name) => CauthdGroup::get_entry_by_name(name.to_string()),
+        Err(_) => Response::NotFound,
+    };
+
+    response.to_c(result, buf, buflen, errnop) as c_int
+}
+
+use libnss::shadow::{CShadow, Shadow, ShadowHooks};
+
+#[no_mangle]
+extern "C" fn _nss_cosiauthd_setspent() -> c_int {
+    let mut iter: MutexGuard<Iterator<Shadow>> = SHADOW_ITERATOR.lock().unwrap();
+
+    let status = match CauthdShadow::get_all_entries() {
+        Response::Success(entries) => iter.open(entries),
+        response => response.to_status(),
+    };
+
+    status as c_int
+}
+
+#[no_mangle]
+extern "C" fn _nss_cosiauthd_endspent() -> c_int {
+    let mut iter: MutexGuard<Iterator<Shadow>> = SHADOW_ITERATOR.lock().unwrap();
+    iter.close() as c_int
+}
+
+#[no_mangle]
+unsafe extern "C" fn _nss_cosiauthd_getspent_r(
+    result: *mut CShadow,
+    buf: *mut libc::c_char,
+    buflen: libc::size_t,
+    errnop: *mut c_int,
+) -> c_int {
+    let mut iter: MutexGuard<Iterator<Shadow>> = SHADOW_ITERATOR.lock().unwrap();
+    iter.next().to_c(result, buf, buflen, errnop) as c_int
+}
+
+#[no_mangle]
+unsafe extern "C" fn nss_cosiauthd_getspnam_r(
+    name_: *const libc::c_char,
+    result: *mut CShadow,
+    buf: *mut libc::c_char,
+    buflen: libc::size_t,
+    errnop: *mut c_int,
+) -> c_int {
+    let cstr = CStr::from_ptr(name_);
+
+    let response = match str::from_utf8(cstr.to_bytes()) {
+        Ok(name) => CauthdShadow::get_entry_by_name(name.to_string()),
         Err(_) => Response::NotFound,
     };
 

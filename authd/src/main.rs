@@ -7,6 +7,9 @@ use tarpc::{
     server::{incoming::Incoming, Channel},
     tokio_serde::formats::Json,
 };
+use tracing_subscriber::{
+    fmt::format::FmtSpan, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
+};
 
 #[derive(Clone)]
 struct FauxDb(std::net::SocketAddr);
@@ -52,6 +55,11 @@ impl Authd for FauxDb {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let server_addr = ("127.0.0.1", 8080);
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::NEW | FmtSpan::CLOSE))
+        .try_init()?;
 
     // tarpc example service boilerplate
     let mut listener = tarpc::serde_transport::tcp::listen(&server_addr, Json::default).await?;

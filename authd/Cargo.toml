@@ -12,6 +12,7 @@ libnss = "0.4"
 reqwest = "*"
 serde_cbor = "*"
 tarpc = { version = "0.30", features = [ "full" ] }
-tokio = "*"
-anyhow = "*"
-futures-util = "*"
+tokio = "1.21"
+anyhow = "1"
+futures-util = "0.3"
+tracing-subscriber = {version="0.3", features=["fmt", "env-filter"]}
