@@ -1,0 +1,14 @@
+[package]
+name = "nss_cosiauth"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nss_cosiauth"
+crate-type = [ "cdylib" ]
+
+[dependencies]
+libnss = "0.4.0"
+libc = "*"
+paste = "*"
+lazy_static = "*"

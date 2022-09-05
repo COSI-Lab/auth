@@ -1,14 +1,3 @@
-[package]
-name = "libcosiauthd"
-version = "0.1.0"
-edition = "2021"
+[workspace]
 
-[lib]
-name = "nss_cosiauthd"
-crate-type = [ "cdylib" ]
-
-[dependencies]
-libnss = "0.4.0"
-libc = "*"
-paste = "*"
-lazy_static = "*"
+members = ["nss_cosiauth", "authd", "auth"]
