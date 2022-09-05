@@ -9,3 +9,4 @@ edition = "2021"
 actix-web = "4"
 serde = { version = "1", features = ["derive"] }
 libnss = "0.4"
+essrpc = "*"
