@@ -1,7 +1,15 @@
 struct CauthdPasswd;
 impl libnss::passwd::PasswdHooks for CauthdPasswd {
     fn get_all_entries() -> libnss::interop::Response<Vec<libnss::passwd::Passwd>> {
-        Response::Success(vec![])
+        Response::Success(vec![Passwd {
+            name: "ember".into(),
+            passwd: "x".into(),
+            uid: 1000,
+            gid: 1000,
+            gecos: "get rekt".into(),
+            dir: "/storage/home/ember".into(),
+            shell: "/bin/fish".into(),
+        }])
     }
 
     fn get_entry_by_uid(uid: libc::uid_t) -> libnss::interop::Response<libnss::passwd::Passwd> {
@@ -29,7 +37,7 @@ impl libnss::group::GroupHooks for CauthdGroup {
 }
 
 use libc::c_int;
-use libnss::group::{CGroup, GroupHooks, Group};
+use libnss::group::{CGroup, Group, GroupHooks};
 use libnss::interop::{CBuffer, Iterator, Response};
 use libnss::passwd::{CPasswd, Passwd};
 use std::ffi::CStr;
