@@ -1,6 +1,9 @@
 //! RPC server exposing all of the functionality over JSON over TLS.
 
-use crate::types::{Group, Passwd, Shadow};
+use crate::{
+    files::Files,
+    types::{Group, Passwd, Shadow},
+};
 use opaque_ke::{
     CipherSuite, CredentialFinalization, CredentialRequest, CredentialResponse,
     RegistrationRequest, RegistrationResponse, RegistrationUpload, ServerLogin,
@@ -60,31 +63,19 @@ pub trait Authd {
 struct SharedState {
     setup: ServerSetup<DefaultCipherSuite>,
     config: crate::AuthdConfig,
+    files: Files,
 }
+
 impl SharedState {
     fn find_password_file(&self, username: &str) -> anyhow::Result<Vec<u8>> {
         let path = PathBuf::from(&self.config.opaque_cookies).join(username);
         Ok(std::fs::read(path)?)
     }
-
-    async fn get_all_groups(&self) -> Vec<Group> {
-        vec![Group {
-            name: "auth-admins".into(),
-            gid: 666,
-            members: vec!["ember".into()],
-        }]
-    }
-
-    async fn get_group_by_name(&self, name: &str) -> Option<Group> {
-        let mut groups = self.get_all_groups().await;
-        groups.retain(|g| g.name == name);
-        groups.pop()
-    }
 }
 
 /// A single open connection to authd.
 struct AuthdSession {
-    state: Arc<SharedState>,
+    state: Arc<Mutex<SharedState>>,
     /// Stores the interim state of the 3-step login protocol.
     login_progress: Option<ServerLogin<DefaultCipherSuite>>,
     /// Who are we talking to?
@@ -99,7 +90,16 @@ impl AuthdSession {
     async fn auth_admin(&self) -> bool {
         if let Some(uname) = &self.purported_username {
             if self.session_key.is_some() {
-                if let Some(admin) = self.state.get_group_by_name("auth-admins".into()).await {
+                if let Some(admin) = self
+                    .state
+                    .lock()
+                    .await
+                    .files
+                    .group
+                    .data
+                    .iter()
+                    .find(|x| x.name == "auth-admins")
+                {
                     if admin.members.contains(&uname) {
                         return true;
                     }
@@ -113,38 +113,80 @@ impl AuthdSession {
 #[tarpc::server]
 impl Authd for Arc<Mutex<AuthdSession>> {
     async fn get_all_groups(self, _ctx: tarpc::context::Context) -> Vec<Group> {
-        vec![]
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files.group.data.clone()
     }
+
     async fn get_group_by_name(self, _ctx: tarpc::context::Context, name: String) -> Option<Group> {
-        None
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files
+            .group
+            .data
+            .iter()
+            .find(|x| x.name == name)
+            .cloned()
     }
     async fn get_group_by_gid(self, _ctx: tarpc::context::Context, gid: u32) -> Option<Group> {
-        None
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files.group.data.iter().find(|x| x.gid == gid).cloned()
     }
 
     async fn get_all_passwd(self, _ctx: tarpc::context::Context) -> Vec<Passwd> {
-        vec![]
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files.passwd.data.clone()
     }
+
     async fn get_passwd_by_name(
         self,
         _ctx: tarpc::context::Context,
         name: String,
     ) -> Option<Passwd> {
-        None
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files
+            .passwd
+            .data
+            .iter()
+            .find(|x| x.name == name)
+            .cloned()
     }
     async fn get_passwd_by_uid(self, _ctx: tarpc::context::Context, uid: u32) -> Option<Passwd> {
-        None
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files.passwd.data.iter().find(|x| x.id == uid).cloned()
     }
 
     async fn get_all_shadow(self, _ctx: tarpc::context::Context) -> Vec<Shadow> {
-        vec![]
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files.shadow.data.clone()
     }
+
     async fn get_shadow_by_name(
         self,
         _ctx: tarpc::context::Context,
         name: String,
     ) -> Option<Shadow> {
-        None
+        let slf = self.lock().await;
+        let mut slf = slf.state.lock().await;
+        slf.files.refresh().expect("refreshing fio");
+        slf.files
+            .shadow
+            .data
+            .iter()
+            .find(|x| x.name == name)
+            .cloned()
     }
 
     async fn register_new_user(
@@ -160,7 +202,7 @@ impl Authd for Arc<Mutex<AuthdSession>> {
         }
         /* TODO: do something with selected_id? run the autoallocate? */
         let reg = ServerRegistration::<DefaultCipherSuite>::start(
-            &slf.state.setup,
+            &slf.state.lock().await.setup,
             reg,
             username.as_bytes(),
         )
@@ -180,7 +222,7 @@ impl Authd for Arc<Mutex<AuthdSession>> {
         }
 
         let password_file = ServerRegistration::<DefaultCipherSuite>::finish(reg);
-        let path = PathBuf::from(&slf.state.config.opaque_cookies)
+        let path = PathBuf::from(&slf.state.lock().await.config.opaque_cookies)
             .join(slf.purported_username.as_ref().unwrap());
         std::fs::write(path, password_file.serialize()).expect("writing out opaque cookie");
         Ok(())
@@ -194,16 +236,22 @@ impl Authd for Arc<Mutex<AuthdSession>> {
     ) -> Result<CredentialResponse<DefaultCipherSuite>, RpcError> {
         let mut slf = self.lock().await;
 
-        let password_file = slf.state.find_password_file(&username).ok().and_then(|d| {
-            ServerRegistration::<DefaultCipherSuite>::deserialize(&d)
-                .map_err(|e| eprintln!("error deserializing password file: {:?}", e))
-                .ok()
-        });
+        let password_file = slf
+            .state
+            .lock()
+            .await
+            .find_password_file(&username)
+            .ok()
+            .and_then(|d| {
+                ServerRegistration::<DefaultCipherSuite>::deserialize(&d)
+                    .map_err(|e| eprintln!("error deserializing password file: {:?}", e))
+                    .ok()
+            });
 
         let mut server_rng = OsRng;
         let server_login_start_result = ServerLogin::start(
             &mut server_rng,
-            &slf.state.setup,
+            &slf.state.lock().await.setup,
             password_file,
             req,
             username.as_bytes(),
@@ -282,13 +330,18 @@ pub async fn main() -> anyhow::Result<()> {
             )?,
     );
 
-    let state = Arc::new(SharedState {
+    let state = Arc::new(Mutex::new(SharedState {
         setup: opaque_ke::ServerSetup::deserialize(
             &std::fs::read(&config_file.opaque_server_setup).expect("read opaque"),
         )
         .expect("deserializing opaque setup"),
         config: config_file.clone(),
-    });
+        files: Files::new(
+            config_file.passwd_file,
+            config_file.group_file,
+            config_file.shadow_file,
+        ),
+    }));
 
     let mut set = JoinSet::new();
 

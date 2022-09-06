@@ -6,6 +6,7 @@ use stubborn_io::{ReconnectOptions, StubbornTcpStream};
 use tarpc::serde_transport::Transport;
 use tokio::net::ToSocketAddrs;
 
+pub mod files;
 pub mod rpc;
 pub mod types;
 
@@ -16,6 +17,7 @@ pub struct AuthdConfig {
     pub authoritative_name: String,
     pub passwd_file: String,
     pub shadow_file: String,
+    pub group_file: String,
     pub opaque_cookies: String,
     pub cert: String,
     pub key: String,
@@ -26,28 +28,23 @@ impl AuthdConfig {
     pub fn expand(&mut self) {
         self.opaque_server_setup = shellexpand::full(&self.opaque_server_setup)
             .expect("expanding opaque_server_setup")
-            .into_owned()
             .into();
         self.passwd_file = shellexpand::full(&self.passwd_file)
             .expect("expanding passwd_file")
-            .into_owned()
             .into();
         self.shadow_file = shellexpand::full(&self.shadow_file)
             .expect("expanding shadow_file")
-            .into_owned()
+            .into();
+        self.group_file = shellexpand::full(&self.group_file)
+            .expect("expanding group_file")
             .into();
         self.opaque_cookies = shellexpand::full(&self.opaque_cookies)
             .expect("expanding opaque_cookies")
-            .into_owned()
             .into();
         self.cert = shellexpand::full(&self.cert)
             .expect("expanding cert")
-            .into_owned()
             .into();
-        self.key = shellexpand::full(&self.key)
-            .expect("expanding key")
-            .into_owned()
-            .into();
+        self.key = shellexpand::full(&self.key).expect("expanding key").into();
     }
 }
 

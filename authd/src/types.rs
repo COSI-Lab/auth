@@ -5,7 +5,7 @@ pub trait ToNSS {
     fn to_nss(&self) -> Self::Target;
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Group {
     pub name: String,
     pub gid: u32,
@@ -35,7 +35,7 @@ impl From<Group> for libnss::group::Group {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Passwd {
     pub name: String,
     // forcing the uid to match the gid because we're pissed
@@ -77,7 +77,7 @@ impl From<Passwd> for libnss::passwd::Passwd {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Shadow {
     pub name: String,
     pub passwd: String,
