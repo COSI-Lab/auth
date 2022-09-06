@@ -1,0 +1,8 @@
+bind_addrs = ['127.0.0.1:8765']
+opaque_server_setup = 'state-dir/opaque'
+opaque_cookies = 'state-dir/cookies'
+authoritative_name = 'auth.lunar.town'
+passwd_file = 'state-dir/passwd'
+shadow_file = 'state-dir/shadow'
+cert = 'state-dir/cert.der'
+key = 'state-dir/key.der'
