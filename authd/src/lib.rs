@@ -52,7 +52,7 @@ impl AuthdConfig {
 }
 
 /// Find the first of `/etc/auth` or `$XDG_CONFIG_DIR/auth` that exists.
-/// 
+///
 /// If neither exist, return `$XDG_CONFIG_DIR/auth`. Unless `$XDG_CONFIG_DIR` is bogus, in which
 /// case `Err`.
 pub fn find_config_dir() -> anyhow::Result<PathBuf> {
@@ -70,7 +70,7 @@ pub fn find_config_dir() -> anyhow::Result<PathBuf> {
 }
 
 /// Connect to authd over TLS, already knowing + trusting its certificate (if we don't get MITM).
-/// 
+///
 /// The server_name is used for SNI. Setting it to localhost is fine for testing.
 pub async fn client_connect<A: ToSocketAddrs + Unpin + Clone + Send + Sync + 'static>(
     addr: A,

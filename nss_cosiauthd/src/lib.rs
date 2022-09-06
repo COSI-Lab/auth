@@ -53,7 +53,7 @@ impl ClientAccessControl {
                 block_on(authd::client_connect(
                     CFG.host,
                     &rustls::Certificate(std::fs::read(&CFG.cert).expect("reading cert")),
-                    "localhost"
+                    "localhost",
                 ))
                 .unwrap(),
             );
