@@ -22,6 +22,7 @@ pub struct AuthdConfig {
 }
 
 impl AuthdConfig {
+    /// Shell-expand any paths in the config.
     pub fn expand(&mut self) {
         self.opaque_server_setup = shellexpand::full(&self.opaque_server_setup)
             .expect("expanding opaque_server_setup")
@@ -50,6 +51,10 @@ impl AuthdConfig {
     }
 }
 
+/// Find the first of `/etc/auth` or `$XDG_CONFIG_DIR/auth` that exists.
+/// 
+/// If neither exist, return `$XDG_CONFIG_DIR/auth`. Unless `$XDG_CONFIG_DIR` is bogus, in which
+/// case `Err`.
 pub fn find_config_dir() -> anyhow::Result<PathBuf> {
     if let Ok(true) = std::path::Path::new("/etc/auth").try_exists() {
         return Ok("/etc/auth".into());
@@ -64,6 +69,9 @@ pub fn find_config_dir() -> anyhow::Result<PathBuf> {
     Ok(config_dir)
 }
 
+/// Connect to authd over TLS, already knowing + trusting its certificate (if we don't get MITM).
+/// 
+/// The server_name is used for SNI. Setting it to localhost is fine for testing.
 pub async fn client_connect<A: ToSocketAddrs + Unpin + Clone + Send + Sync + 'static>(
     addr: A,
     cert: &rustls::Certificate,

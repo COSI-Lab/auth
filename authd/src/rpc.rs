@@ -1,3 +1,5 @@
+//! RPC server exposing all of the functionality over JSON over TLS.
+
 use crate::types::{Group, Passwd, Shadow};
 use opaque_ke::{
     CipherSuite, CredentialFinalization, CredentialRequest, CredentialResponse,
@@ -53,6 +55,9 @@ pub trait Authd {
     ) -> Result<(), RpcError>;
 }
 
+/// All of the shared state amongst all of the various open sessions.
+///
+/// Ideally the DB context access lives here.
 struct SharedState {
     setup: ServerSetup<DefaultCipherSuite>,
     config: crate::AuthdConfig,
@@ -78,17 +83,22 @@ impl SharedState {
     }
 }
 
+/// A single open connection to authd.
 struct AuthdSession {
     state: Arc<SharedState>,
+    /// Stores the interim state of the 3-step login protocol.
     login_progress: Option<ServerLogin<DefaultCipherSuite>>,
+    /// Who are we talking to?
     peer_addr: std::net::SocketAddr,
-    authed_as: Option<String>,
+    /// They have claimed to have this username
+    purported_username: Option<String>,
+    /// If this is Some, purported_username is authenticated.
     session_key: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl AuthdSession {
     async fn auth_admin(&self) -> bool {
-        if let Some(uname) = &self.authed_as {
+        if let Some(uname) = &self.purported_username {
             if self.session_key.is_some() {
                 if let Some(admin) = self.state.get_group_by_name("auth-admins".into()).await {
                     if admin.members.contains(&uname) {
@@ -156,7 +166,7 @@ impl Authd for Arc<Mutex<AuthdSession>> {
             username.as_bytes(),
         )
         .unwrap();
-        slf.authed_as = Some(username);
+        slf.purported_username = Some(username);
         Ok(reg.message)
     }
 
@@ -171,8 +181,8 @@ impl Authd for Arc<Mutex<AuthdSession>> {
         }
 
         let password_file = ServerRegistration::<DefaultCipherSuite>::finish(reg);
-        let path =
-            PathBuf::from(&slf.state.config.opaque_cookies).join(slf.authed_as.as_ref().unwrap());
+        let path = PathBuf::from(&slf.state.config.opaque_cookies)
+            .join(slf.purported_username.as_ref().unwrap());
         std::fs::write(path, password_file.serialize()).expect("writing out opaque cookie");
         Ok(())
     }
@@ -203,7 +213,7 @@ impl Authd for Arc<Mutex<AuthdSession>> {
         .unwrap();
 
         slf.login_progress = Some(server_login_start_result.state);
-        slf.authed_as = Some(username);
+        slf.purported_username = Some(username);
         Ok(server_login_start_result.message)
     }
 
@@ -233,10 +243,10 @@ use tracing_subscriber::{
 };
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// Top-level command.
+/// authentication daemon
 struct AuthdArgs {
     #[argh(option)]
-    /// config file to load (or /etc/auth/authd.toml, $HOME/.local/share/authd.toml)
+    /// config file to load (or /etc/auth/authd.toml, $HOME/.config/auth/authd.toml)
     config_file: Option<PathBuf>,
 }
 
@@ -244,6 +254,7 @@ struct AuthdArgs {
 // ugh rust is really lots of typing sometimes
 
 pub async fn main() -> anyhow::Result<()> {
+    // pretty logs if you set RUST_LOG
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::NEW | FmtSpan::CLOSE))
@@ -303,7 +314,7 @@ pub async fn main() -> anyhow::Result<()> {
                     let session = Arc::new(Mutex::new(AuthdSession {
                         state: state.clone(),
                         peer_addr,
-                        authed_as: None,
+                        purported_username: None,
                         session_key: None,
                         login_progress: None,
                     }));
