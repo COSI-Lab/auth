@@ -38,23 +38,20 @@ impl ClientAccessControl {
     fn with_client<O>(&mut self, f: impl FnOnce(&mut authd::rpc::AuthdClient) -> O) -> O {
         let _guard = RT.enter();
         let mut lts = self.latest_ts.lock().unwrap();
-
-        if let Some(slp) = lts.as_mut() {
-            *slp = std::time::Instant::now() + Duration::from_secs(30);
-        } else {
-            *lts = Some(std::time::Instant::now() + Duration::from_secs(30));
-        }
+        *lts = Some(std::time::Instant::now() + Duration::from_secs(30));
         let cl = self.client.clone();
         let latest_ts = self.latest_ts.clone();
         tokio::spawn(async move {
             loop {
                 let dur = latest_ts.lock().unwrap().unwrap_or(Instant::now()).into();
                 sleep_until(dur).await;
-                // check if it got moved forward while we were sleeping
+                // make sure it wasn't moved forward while we were sleeping
                 if latest_ts.lock().unwrap().unwrap_or(Instant::now()) < Instant::now() {
                     *cl.lock().unwrap() = None;
                     #[cfg(debug_assertions)]
-                    eprintln!("ClientAccessControl: client timed out, closing connection.");
+                    eprintln!(
+                        "nss_cosiauthd: ClientAccessControl: client timed out, closing connection."
+                    );
                     break;
                 }
             }
