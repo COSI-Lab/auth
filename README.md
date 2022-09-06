@@ -1,6 +1,6 @@
 # COSI auth
 
-We officially declare defeat against SSSD, OpenLDAP, GSS-API, FreeIPA, Heimdal, MIT krb5, and all their ilk.
+We officially admit defeat against SSSD, OpenLDAP, GSS-API, FreeIPA, Heimdal, MIT krb5, and all their ilk.
 
 We maintain that the basics of the Linux auth stack are simple enough to target directly.
 
@@ -16,17 +16,31 @@ The `auth` tool allows for inspection and editing of the database, user password
 
 The OPAQUE password-authenticated key exchange is used instead of password hashes.
 
-## Deploying
+## Local deployments for testing
 
 !! WIP !! WIP !! WIP !! WIP !! WIP !!
 
-this software is currently too shitty to be deployable. FIXME: port+uri configuration.
+All software will search for its config files first in `/etc/auth` and then in `$HOME/.config/auth`.
+Generate a TLS certificate and key. I have only tested EC, not RSA. There's a keypair here for your
+convenience, made with rcgen.
 
-`sudo cp -r target/release/libnss_cosiauthd.so /lib/x86_64-linux-gnu/libnss_cosiauthd.so.2` will make NSS know what is happening.
+Write `/etc/auth/nss_cosiauthd.toml`, as an example:
+
+```toml
+host = '127.0.0.1:8765'
+cert = '/etc/auth/cert.der'
+```
+
+Using the home directory is a bad idea for deployment, it is included in the authd example toml to
+demonstrate that the paths in the authd config support basic shell expansion (env and tilde).
+
+`sudo cp -r target/release/libnss_cosiauthd.so /lib/x86_64-linux-gnu/libnss_cosiauthd.so.2` will
+make NSS know what is happening.
 
 `getent -s cosiauthd passwd` should then hang in your terminal.
 
-`cargo run --bin authd` in another terminal will start up a localhost server, and `getent` should print its result (probably empty).
+`cargo run --release --bin authd` in another terminal will start up a localhost server, and `getent`
+should print its result (probably empty).
 
 ## ...
 

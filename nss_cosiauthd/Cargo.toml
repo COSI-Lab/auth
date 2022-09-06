@@ -9,11 +9,14 @@ crate-type = [ "cdylib" ]
 
 [dependencies]
 libnss = "0.4.0"
-libc = "*"
-lazy_static = "*"
-reqwest = { version = "0.11", features = ["json"] }
+libc = "0.2"
+lazy_static = "1.4"
 tokio = { version = "1", features = ["full"] }
 authd = { path = "../authd" }
 tarpc = "0.30"
 futures = "0.3"
-stubborn-io = "0.3"
+rustls = "0.20"
+tokio-rustls = "0.23"
+serde = { version = "1", features = ["derive"] }
+toml = "0.5"
+shellexpand = "2"

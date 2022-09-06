@@ -17,11 +17,10 @@ shadow:         files cosiauthd
 gshadow:        files cosiauthd
 ```
 
-Write `/etc/auth/nss_authd.toml`, as an example:
+Write `/etc/auth/nss_cosiauthd.toml`, as an example:
 
 ```toml
-host = 'authd.cosi.clarkson.edu'
-port = 8765
+host = 'authd.cosi.clarkson.edu:8765'
 ```
 
 The module will try very, _very_ hard to make a TLS connection to the server. It will wait forever if it must. If it is taking longer than you expect, maybe the port is wrong?

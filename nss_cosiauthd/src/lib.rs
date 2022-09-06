@@ -1,4 +1,3 @@
-use authd::rpc::AuthdClient;
 use authd::types::ToNSS;
 use futures::executor::block_on;
 use libc::c_int;
@@ -19,19 +18,10 @@ struct ClientAccessControl {
     latest_ts: Arc<Mutex<Option<Instant>>>,
 }
 
-use stubborn_io::{ReconnectOptions, StubbornTcpStream};
-use tarpc::{client::Config, serde_transport::Transport};
-use tokio::net::ToSocketAddrs;
-
-pub async fn client_connect<A: ToSocketAddrs + Unpin + Clone + Send + Sync + 'static>(
-    addr: A,
-) -> std::io::Result<AuthdClient> {
-    let reconnect_opts = ReconnectOptions::new()
-        .with_exit_if_first_connect_fails(false)
-        .with_retries_generator(|| std::iter::repeat(Duration::from_secs(1)));
-    let tcp_stream = StubbornTcpStream::connect_with_options(addr, reconnect_opts).await?;
-    let transport = Transport::from((tcp_stream, tarpc::tokio_serde::formats::Json::default()));
-    Ok(AuthdClient::new(Config::default(), transport).spawn())
+#[derive(serde::Deserialize)]
+struct NssConfig {
+    host: std::net::SocketAddr,
+    cert: String,
 }
 
 impl ClientAccessControl {
@@ -59,7 +49,14 @@ impl ClientAccessControl {
 
         let mut client = self.client.lock().unwrap();
         if client.is_none() {
-            *client = Some(block_on(client_connect(("127.0.0.1", 8080))).unwrap());
+            *client = Some(
+                block_on(authd::client_connect(
+                    CFG.host,
+                    &rustls::Certificate(std::fs::read(&CFG.cert).expect("reading cert")),
+                    "localhost"
+                ))
+                .unwrap(),
+            );
         }
         f(client.as_mut().unwrap())
     }
@@ -68,10 +65,15 @@ impl ClientAccessControl {
 lazy_static::lazy_static! {
     static ref PASSWD_ITERATOR: Mutex<Iterator<Passwd>> = Mutex::new(Iterator::<Passwd>::new());
     static ref GROUP_ITERATOR: Mutex<Iterator<Group>> = Mutex::new(Iterator::<Group>::new());
-    static ref SHADOW_ITERATOR: Mutex<Iterator<Shadow>> = Mutex::new(Iterator::<Shadow>::new());
+    static ref SHADOW_ITERATOR: Mutex<Iterator<libnss::shadow::Shadow>> = Mutex::new(Iterator::<libnss::shadow::Shadow>::new());
 
     static ref RPC: Mutex<ClientAccessControl> = Mutex::new(ClientAccessControl::default());
     static ref RT: Runtime = Runtime::new().expect("could not initialize tokio runtime");
+    static ref CFG: NssConfig = {
+        let mut cfg: NssConfig =  toml::from_slice(std::fs::read(authd::find_config_dir().map(|cd| cd.join("nss_cosiauthd.toml")).expect("no nss_cosiauthd.toml found!")).unwrap().as_slice()).unwrap();
+        cfg.cert = shellexpand::full(&cfg.cert).unwrap().to_string();
+        cfg
+    };
 }
 
 struct CauthdPasswd;
