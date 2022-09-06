@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 authd = { path = "../authd" }
+argh = "0.1.8"
+opaque-ke = { git = "https://github.com/novifinancial/opaque-ke.git", features = ["argon2"] }
