@@ -5,6 +5,7 @@ use libnss::group::{CGroup, Group, GroupHooks};
 use libnss::interop::{Iterator, Response};
 use libnss::passwd::{CPasswd, Passwd};
 use std::ffi::CStr;
+use std::net::ToSocketAddrs;
 use std::str;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -20,7 +21,7 @@ struct ClientAccessControl {
 
 #[derive(serde::Deserialize)]
 struct NssConfig {
-    host: std::net::SocketAddr,
+    host: authd::SocketName,
     cert: String,
 }
 
@@ -51,7 +52,12 @@ impl ClientAccessControl {
         if client.is_none() {
             *client = Some(
                 block_on(authd::client_connect(
-                    CFG.host,
+                    CFG.host
+                        .to_socket_addrs()
+                        .expect("resolving host")
+                        .into_iter()
+                        .next()
+                        .expect("no host found"),
                     &rustls::Certificate(std::fs::read(&CFG.cert).expect("reading cert")),
                     "localhost",
                 ))

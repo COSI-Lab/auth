@@ -1,7 +1,7 @@
 use argh::FromArgs;
-use authd::rpc::DefaultCipherSuite;
+use authd::{rpc::DefaultCipherSuite, SocketName};
 use opaque_ke::{ClientLogin, ClientLoginFinishParameters, ClientRegistrationFinishParameters};
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::ToSocketAddrs, path::PathBuf};
 use tarpc::context;
 use zeroize::Zeroizing;
 
@@ -47,7 +47,7 @@ struct CreateUser {
     homedir: String,
     #[argh(option)]
     /// authd IP address and port
-    host: SocketAddr,
+    host: SocketName,
     #[argh(option)]
     /// server identity certificate
     cert: PathBuf,
@@ -84,9 +84,19 @@ async fn main() -> anyhow::Result<()> {
 
             let cert = rustls::Certificate(std::fs::read(cuser.cert).expect("reading cert"));
 
-            let cl = authd::client_connect(cuser.host, &cert, "localhost")
-                .await
-                .expect("connecting to authd");
+            let cl = authd::client_connect(
+                cuser
+                    .host
+                    .to_socket_addrs()
+                    .expect("resolving")
+                    .into_iter()
+                    .next()
+                    .expect("need a host"),
+                &cert,
+                "localhost",
+            )
+            .await
+            .expect("connecting to authd");
 
             let admin_user = rpassword::prompt_password("admin username: ").unwrap();
             let admin_pass = rpassword::prompt_password("admin password: ")

@@ -25,7 +25,7 @@ impl<T> Reloadable<T> {
     fn new(pth: PathBuf) -> Self {
         Self {
             latest_ts: None,
-            pth: pth,
+            pth,
             data: vec![],
         }
     }

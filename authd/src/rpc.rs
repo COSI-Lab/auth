@@ -100,7 +100,7 @@ impl AuthdSession {
                     .iter()
                     .find(|x| x.name == "auth-admins")
                 {
-                    if admin.members.contains(&uname) {
+                    if admin.members.contains(uname) {
                         return true;
                     }
                 }
