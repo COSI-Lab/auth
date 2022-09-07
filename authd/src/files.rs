@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::time::SystemTime;
 use std::{fs::File, path::PathBuf};
 
+#[derive(Debug)]
 /// Use database backed by 3 files using the `/etc/passwd` `/etc/group` and `/etc/shadow` file
 /// formats.
 ///
@@ -15,6 +16,7 @@ pub struct Files {
     pub shadow: Reloadable<Shadow>,
 }
 
+#[derive(Debug)]
 pub struct Reloadable<T> {
     pub latest_ts: Option<SystemTime>,
     pub pth: PathBuf,
@@ -122,9 +124,9 @@ impl Files {
             let change_min_days = split.next().map(|i| i.parse::<i64>().unwrap()).unwrap();
             let change_max_days = split.next().map(|i| i.parse::<i64>().unwrap()).unwrap();
             let change_warn_days = split.next().map(|i| i.parse::<i64>().unwrap()).unwrap();
-            let change_inactive_days = split.next().map(|i| i.parse::<i64>().unwrap()).unwrap();
-            let expire_date = split.next().map(|i| i.parse::<i64>().unwrap()).unwrap();
-            let _unused = split.next().map(|i| i.parse::<i64>().unwrap()).unwrap();
+            let change_inactive_days = split.next().map(|i| i.parse::<i64>().ok()).unwrap();
+            let expire_date = split.next().map(|i| i.parse::<i64>().ok()).unwrap();
+            let _unused = split.next().map(|i| i.parse::<i64>().ok()).unwrap();
 
             shadow.push(Shadow {
                 name,

@@ -21,3 +21,4 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.5"
 shellexpand = "2"
 anyhow = "1"
+trust-dns-resolver = "0.22"

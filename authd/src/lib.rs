@@ -63,7 +63,7 @@ impl std::net::ToSocketAddrs for SocketName {
         })
     }
 }
-#[derive(serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, Clone)]
 pub struct AuthdConfig {
     pub bind_addrs: Vec<SocketAddr>,
     pub opaque_server_setup: String,

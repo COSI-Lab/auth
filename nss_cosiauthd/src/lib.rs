@@ -5,12 +5,11 @@ use libnss::group::{CGroup, Group, GroupHooks};
 use libnss::interop::{Iterator, Response};
 use libnss::passwd::{CPasswd, Passwd};
 use std::ffi::CStr;
-use std::net::ToSocketAddrs;
 use std::str;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tarpc::context;
-use tokio::runtime::Runtime;
+use tokio::runtime::{self, Runtime};
 use tokio::time::sleep_until;
 
 #[derive(Default)]
@@ -27,6 +26,7 @@ struct NssConfig {
 
 impl ClientAccessControl {
     fn with_client<O>(&mut self, f: impl FnOnce(&mut authd::rpc::AuthdClient) -> O) -> O {
+        use trust_dns_resolver::TokioAsyncResolver;
         let _guard = RT.enter();
         let mut lts = self.latest_ts.lock().unwrap();
         *lts = Some(std::time::Instant::now() + Duration::from_secs(30));
@@ -48,16 +48,33 @@ impl ClientAccessControl {
             }
         });
 
+        let resolver = TokioAsyncResolver::tokio_from_system_conf().expect("need dns resolver");
+
+        let final_sockaddr;
+
+        match &CFG.host {
+            authd::SocketName::Dns(name, port) => {
+                let ip = RT
+                    .block_on(resolver.lookup_ip(name))
+                    .expect("lookup failure");
+                final_sockaddr = Some(std::net::SocketAddr::new(
+                    ip.iter().next().expect("need at least one ip"),
+                    *port,
+                ))
+            }
+            authd::SocketName::Addr(sa) => {
+                final_sockaddr = Some(*sa);
+            }
+        }
+        eprintln!(
+            "nss_cosiauthd: ClientAccessControl: connecting to {:?}",
+            final_sockaddr
+        );
         let mut client = self.client.lock().unwrap();
         if client.is_none() {
             *client = Some(
-                block_on(authd::client_connect(
-                    CFG.host
-                        .to_socket_addrs()
-                        .expect("resolving host")
-                        .into_iter()
-                        .next()
-                        .expect("no host found"),
+                RT.block_on(authd::client_connect(
+                    final_sockaddr.expect("no host found"),
                     &rustls::Certificate(std::fs::read(&CFG.cert).expect("reading cert")),
                     "localhost",
                 ))
@@ -74,7 +91,7 @@ lazy_static::lazy_static! {
     static ref SHADOW_ITERATOR: Mutex<Iterator<libnss::shadow::Shadow>> = Mutex::new(Iterator::<libnss::shadow::Shadow>::new());
 
     static ref RPC: Mutex<ClientAccessControl> = Mutex::new(ClientAccessControl::default());
-    static ref RT: Runtime = Runtime::new().expect("could not initialize tokio runtime");
+    static ref RT: Runtime = runtime::Builder::new_multi_thread().worker_threads(2).enable_io().enable_time().build().expect("could not initialize tokio runtime");
     static ref CFG: NssConfig = {
         let mut cfg: NssConfig =  toml::from_slice(std::fs::read(authd::find_config_dir().map(|cd| cd.join("nss_cosiauthd.toml")).expect("no nss_cosiauthd.toml found!")).unwrap().as_slice()).unwrap();
         cfg.cert = shellexpand::full(&cfg.cert).unwrap().to_string();

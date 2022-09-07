@@ -86,8 +86,8 @@ pub struct Shadow {
     pub change_min_days: i64,
     pub change_max_days: i64,
     pub change_warn_days: i64,
-    pub change_inactive_days: i64,
-    pub expire_date: i64,
+    pub change_inactive_days: Option<i64>,
+    pub expire_date: Option<i64>,
 }
 
 impl ToNSS for Shadow {
@@ -100,8 +100,8 @@ impl ToNSS for Shadow {
             change_min_days: self.change_min_days,
             change_max_days: self.change_max_days,
             change_warn_days: self.change_warn_days,
-            change_inactive_days: self.change_inactive_days,
-            expire_date: self.expire_date,
+            change_inactive_days: self.change_inactive_days.unwrap_or(0),
+            expire_date: self.expire_date.unwrap_or(0),
             reserved: 0,
         }
     }
@@ -116,8 +116,8 @@ impl From<Shadow> for libnss::shadow::Shadow {
             change_min_days: s.change_min_days,
             change_max_days: s.change_max_days,
             change_warn_days: s.change_warn_days,
-            change_inactive_days: s.change_inactive_days,
-            expire_date: s.expire_date,
+            change_inactive_days: s.change_inactive_days.unwrap_or(0),
+            expire_date: s.expire_date.unwrap_or(0),
             reserved: 0,
         }
     }

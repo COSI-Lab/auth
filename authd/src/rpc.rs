@@ -65,7 +65,11 @@ struct SharedState {
     config: crate::AuthdConfig,
     files: Files,
 }
-
+impl std::fmt::Debug for SharedState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedState").finish()
+    }
+}
 impl SharedState {
     fn find_password_file(&self, username: &str) -> anyhow::Result<Vec<u8>> {
         let path = PathBuf::from(&self.config.opaque_cookies).join(username);
@@ -73,6 +77,7 @@ impl SharedState {
     }
 }
 
+#[derive(Debug)]
 /// A single open connection to authd.
 struct AuthdSession {
     state: Arc<Mutex<SharedState>>,
@@ -101,6 +106,7 @@ impl AuthdSession {
                     .find(|x| x.name == "auth-admins")
                 {
                     if admin.members.contains(uname) {
+                        tracing::info!("{} just did admin things", uname);
                         return true;
                     }
                 }
@@ -159,6 +165,7 @@ impl Authd for Arc<Mutex<AuthdSession>> {
             .find(|x| x.name == name)
             .cloned()
     }
+
     async fn get_passwd_by_uid(self, _ctx: tarpc::context::Context, uid: u32) -> Option<Passwd> {
         let slf = self.lock().await;
         let mut slf = slf.state.lock().await;
