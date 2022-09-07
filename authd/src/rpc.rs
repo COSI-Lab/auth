@@ -360,6 +360,7 @@ pub async fn main() -> anyhow::Result<()> {
         let listener = TcpListener::bind(&bindaddr).await.expect("tcp bind");
 
         set.spawn(async move {
+            tracing::info!("listening on {}", bindaddr);
             loop {
                 let acceptor = acceptor.clone();
                 let state = state.clone();
@@ -377,6 +378,7 @@ pub async fn main() -> anyhow::Result<()> {
                         session_key: None,
                         login_progress: None,
                     }));
+                    tracing::info!("new connection: {:?}", session);
                     channel.execute(session.serve()).await;
                 });
             }
