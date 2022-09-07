@@ -84,7 +84,7 @@ struct AuthdSession {
     /// Stores the interim state of the 3-step login protocol.
     login_progress: Option<ServerLogin<DefaultCipherSuite>>,
     /// Who are we talking to?
-    peer_addr: std::net::SocketAddr,
+    _peer_addr: std::net::SocketAddr,
     /// They have claimed to have this username
     purported_username: Option<String>,
     /// If this is Some, purported_username is authenticated.
@@ -200,7 +200,7 @@ impl Authd for Arc<Mutex<AuthdSession>> {
         self,
         _ctx: tarpc::context::Context,
         username: String,
-        selected_uid: Option<u32>,
+        _selected_uid: Option<u32>,
         reg: RegistrationRequest<DefaultCipherSuite>,
     ) -> Result<RegistrationResponse<DefaultCipherSuite>, RpcError> {
         let mut slf = self.lock().await;
@@ -373,7 +373,7 @@ pub async fn main() -> anyhow::Result<()> {
 
                     let session = Arc::new(Mutex::new(AuthdSession {
                         state: state.clone(),
-                        peer_addr,
+                        _peer_addr: peer_addr,
                         purported_username: None,
                         session_key: None,
                         login_progress: None,

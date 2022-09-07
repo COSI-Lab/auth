@@ -50,22 +50,18 @@ impl ClientAccessControl {
 
         let resolver = TokioAsyncResolver::tokio_from_system_conf().expect("need dns resolver");
 
-        let final_sockaddr;
-
-        match &CFG.host {
+        let final_sockaddr = match &CFG.host {
             authd::SocketName::Dns(name, port) => {
                 let ip = RT
                     .block_on(resolver.lookup_ip(name))
                     .expect("lookup failure");
-                final_sockaddr = Some(std::net::SocketAddr::new(
+                Some(std::net::SocketAddr::new(
                     ip.iter().next().expect("need at least one ip"),
                     *port,
                 ))
             }
-            authd::SocketName::Addr(sa) => {
-                final_sockaddr = Some(*sa);
-            }
-        }
+            authd::SocketName::Addr(sa) => Some(*sa),
+        };
         eprintln!(
             "nss_cosiauthd: ClientAccessControl: connecting to {:?}",
             final_sockaddr

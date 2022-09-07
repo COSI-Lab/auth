@@ -8,7 +8,7 @@ name = "nss_cosiauthd"
 crate-type = [ "cdylib" ]
 
 [dependencies]
-libnss = "0.4.0"
+libnss = { path = "/home/ember/dev/libnss-rs/libnss" }
 libc = "0.2"
 lazy_static = "1.4"
 tokio = { version = "1", features = ["full"] }
