@@ -1,7 +1,8 @@
 use argh::FromArgs;
 use authd::{rpc::DefaultCipherSuite, SocketName};
+use chrono::Datelike;
 use opaque_ke::{ClientLogin, ClientLoginFinishParameters, ClientRegistrationFinishParameters};
-use std::{net::ToSocketAddrs, path::PathBuf};
+use std::{io::Write, net::ToSocketAddrs, path::PathBuf};
 use tarpc::context;
 use zeroize::Zeroizing;
 
@@ -18,6 +19,7 @@ enum AuthSubcommands {
     GenOpaque(GenOpaque),
     CreateUser(CreateUser),
     BootstrapUser(LetThereBeAdmin),
+    LocalCreateUser(LocalCreateUser),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -51,6 +53,18 @@ struct CreateUser {
     #[argh(option)]
     /// server identity certificate
     cert: PathBuf,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// Create a new user in the local files
+#[argh(subcommand, name = "local-create-user")]
+struct LocalCreateUser {
+    #[argh(option)]
+    /// username
+    name: String,
+    #[argh(option)]
+    /// name of shell to use
+    authd_config: PathBuf,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -221,6 +235,117 @@ async fn main() -> anyhow::Result<()> {
             println!("welcome to the matrix, {}", prime_mover.name);
 
             // TODO: add user to auth-admins
+        }
+
+        AuthSubcommands::LocalCreateUser(luser) => {
+            let mut cfg: authd::AuthdConfig =
+                toml::from_slice(&std::fs::read(&luser.authd_config)?)?;
+            cfg.expand();
+
+            let pwbytes = loop {
+                let pwbytes = Zeroizing::new(
+                    rpassword::prompt_password(format!("New password for {}:", luser.name))
+                        .expect("reading pw1")
+                        .into_bytes(),
+                );
+                let pwbytes2 = Zeroizing::new(
+                    rpassword::prompt_password("Confirm new password:")
+                        .expect("reading pw2")
+                        .into_bytes(),
+                );
+                if pwbytes == pwbytes2 {
+                    break pwbytes;
+                } else {
+                    eprintln!("Passwords don't match, try again");
+                }
+            };
+            let hash = pwhash::bcrypt::hash_with(
+                pwhash::bcrypt::BcryptSetup {
+                    variant: Some(pwhash::bcrypt::BcryptVariant::V2y),
+                    cost: Some(12),
+                    ..Default::default()
+                },
+                &pwbytes,
+            )
+            .expect("bcrypt failed");
+
+            let files =
+                authd::files::Files::new(&cfg.passwd_file, &cfg.group_file, &cfg.shadow_file);
+            let all_users = files.get_all_passwd()?;
+            let largest_uid = all_users
+                .iter()
+                .max_by_key(|u| u.id)
+                .map(|p| p.id)
+                .unwrap_or(1);
+            let mut f = std::fs::File::options()
+                .write(true)
+                .create(true)
+                .open(PathBuf::from(&cfg.passwd_file))?;
+
+            std::io::Seek::seek(&mut f, std::io::SeekFrom::End(0))?;
+            writeln!(
+                f,
+                "{}",
+                authd::types::Passwd {
+                    name: luser.name.clone(),
+                    id: largest_uid + 1,
+                    gecos: "freshly made by auth".into(),
+                    dir: "/nonexistent".into(),
+                    shell: "/bin/false".into(),
+                }
+            )?;
+            let mut f = std::fs::File::options()
+                .write(true)
+                .create(true)
+                .open(PathBuf::from(&cfg.shadow_file))?;
+
+            std::io::Seek::seek(&mut f, std::io::SeekFrom::End(0))?;
+            let today_days = chrono::Utc::today().num_days_from_ce()
+                - chrono::NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce();
+            writeln!(
+                f,
+                "{}",
+                authd::types::Shadow {
+                    name: luser.name.clone(),
+                    passwd: hash,
+                    last_change: today_days as _,
+                    change_min_days: 0,
+                    change_max_days: 0,
+                    change_warn_days: 0,
+                    change_inactive_days: None,
+                    expire_date: None,
+                }
+            )?;
+
+            let mut rng = opaque_ke::rand::rngs::OsRng;
+            let srv = opaque_ke::ServerSetup::<DefaultCipherSuite>::deserialize(&std::fs::read(
+                cfg.opaque_server_setup,
+            )?)
+            .expect("reading opaque server setup");
+            let client_reg =
+                opaque_ke::ClientRegistration::<DefaultCipherSuite>::start(&mut rng, &pwbytes)
+                    .expect("starting registration");
+
+            let server_reg = opaque_ke::ServerRegistration::<DefaultCipherSuite>::start(
+                &srv,
+                client_reg.message,
+                luser.name.as_bytes(),
+            )
+            .unwrap();
+            let completed_reg = client_reg
+                .state
+                .finish(
+                    &mut rng,
+                    &pwbytes,
+                    server_reg.message,
+                    ClientRegistrationFinishParameters::default(),
+                )
+                .expect("finishing registration");
+
+            let password_file =
+                opaque_ke::ServerRegistration::<DefaultCipherSuite>::finish(completed_reg.message);
+            let path = PathBuf::from(&cfg.opaque_cookies).join(luser.name.clone());
+            std::fs::write(path, password_file.serialize()).expect("writing out opaque cookie");
         }
     }
 

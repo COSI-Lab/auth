@@ -77,6 +77,16 @@ impl From<Passwd> for libnss::passwd::Passwd {
     }
 }
 
+impl std::fmt::Display for Passwd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{}:{}:{}:{}:{}:{}",
+            self.name, "x", self.id, self.id, self.gecos, self.dir, self.shell
+        )
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Shadow {
     pub name: String,
@@ -90,6 +100,27 @@ pub struct Shadow {
     pub expire_date: Option<i64>,
 }
 
+impl std::fmt::Display for Shadow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{}:{}:{}:{}:{}:{}:{}:{}:",
+            self.name,
+            self.passwd,
+            self.last_change,
+            self.change_min_days,
+            self.change_max_days,
+            self.change_warn_days,
+            self.change_inactive_days
+                .map(|x| x.to_string())
+                .unwrap_or(String::new()),
+            self.expire_date
+                .map(|x| x.to_string())
+                .unwrap_or(String::new()),
+        )
+    }
+}
+
 impl ToNSS for Shadow {
     type Target = libnss::shadow::Shadow;
     fn to_nss(&self) -> libnss::shadow::Shadow {
@@ -100,8 +131,8 @@ impl ToNSS for Shadow {
             change_min_days: self.change_min_days,
             change_max_days: self.change_max_days,
             change_warn_days: self.change_warn_days,
-            change_inactive_days: self.change_inactive_days.unwrap_or(0),
-            expire_date: self.expire_date.unwrap_or(0),
+            change_inactive_days: self.change_inactive_days.unwrap_or(-1),
+            expire_date: self.expire_date.unwrap_or(-1),
             reserved: 0,
         }
     }
